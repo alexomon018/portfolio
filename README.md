@@ -1,42 +1,27 @@
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fleerob%2Fsite)
+# Personal Website
 
-# site
+A modern, performant personal website built with Next.js, TypeScript, and Tailwind CSS. Features server components, MDX for content management, and dynamic page transitions.
 
-- **Framework**: [Next.js](https://nextjs.org/)
-- **Database**: [Postgres](https://vercel.com/postgres)
-- **Deployment**: [Vercel](https://vercel.com)
-- **Styling**: [Tailwind CSS](https://tailwindcss.com)
+## Tech Stack
+
+- **Framework**: [Next.js](https://nextjs.org/) with TypeScript
+- **Database**: [Postgres](https://vercel.com/postgres) for storing redirects
+- **Styling**: [Tailwind CSS](https://tailwindcss.com) for utility-first styling
+- **Content**: MDX for content management with the Rust compiler
 - **Analytics**: [Vercel Analytics](https://vercel.com/analytics)
+- **Deployment**: [Vercel](https://vercel.com)
+
+## Features
+
+- ⚡️ Next.js 15 with Server Components
+- 📝 MDX for content management
+- 🎨 Tailwind CSS for styling
+- 🔄 View Transitions API integration
+- 🔍 SEO optimized with dynamic sitemap
+- 📱 Fully responsive design
+- 🔐 TypeScript for type safety
+- 📊 Vercel Analytics integration
 
 ## Running Locally
 
 This application requires Node.js v18.17+.
-
-```bash
-git clone https://github.com/leerob/site.git
-cd site
-bun install
-bun run delete # Remove all of my notes
-bun dev
-```
-
-Optional: Create a `.env.local` file with your `POSTGRES_URL` environment variable to store redirects.
-
-## Database Schema
-
-```sql
-CREATE TABLE redirects (
-  id SERIAL PRIMARY KEY,
-  source VARCHAR(255) NOT NULL,
-  destination VARCHAR(255) NOT NULL,
-  permanent BOOLEAN NOT NULL
-);
-```
-
-## License
-
-1. You are free to use this code as inspiration.
-2. Please do not copy it directly.
-3. Crediting the author is appreciated.
-
-Please remove all of my personal information by running `bun run delete`.

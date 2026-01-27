@@ -1,0 +1,292 @@
+import { AnimatedName } from '../animated-name.tsx';
+
+export const metadata = {
+  title: 'Guide to Claude',
+  alternates: {
+    canonical: '/n/guide-to-claude',
+  },
+};
+
+# Guide to Claude
+
+<AnimatedName />
+
+Look, we've all been there. You're working with Claude Code, things are going great, and then suddenly... garbage. The responses get weird, the code gets sloppy, and you're left wondering if Anthropic secretly downgraded the model overnight.
+
+Spoiler: they didn't.
+
+Here's the thing about "AI slop" in 2024: it's not really a model problem anymore. It's a usage problem. And since we're working with black-box tools like Claude Code, we don't get to fiddle with weights or training data. We've got basically one lever to pull: **context**.
+
+So when your output quality tanks, the first place to look isn't the model. It's what you're feeding it.
+
+## What Even Is Context?
+
+Context is just everything the LLM sees when it's generating a response. Simple as that.
+
+This includes your prompt, system instructions, metadata, previous messages, tool calls, internal reasoning, agent rules, and whatever the model's written so far. If it's visible to the model, it counts as context.
+
+Now, LLMs have finite context windows. Not just because of hard token limits, but because they actually get worse as conversations grow. Even before you hit the cap, the model starts losing precision. It's like trying to remember everything from a three-hour meeting, you're going to miss stuff.
+
+Think of context as everything the model can "remember" right now, in this exact moment.
+
+## Claude Code: What You're Actually Working With
+
+Claude Code is Anthropic's agentic coding tool. It's basically raw model access wrapped in a CLI, which is both powerful and dangerous.
+
+Here's why it's cool:
+
+- **Full codebase awareness**: Point it at a project directory and it understands the whole thing, how files relate, your patterns, all of it
+- **Autonomous execution**: It can do multi-step workflows without you babysitting. File edits, shell commands, Git operations, running tests, the works
+- **Terminal-native**: It lives in your terminal, so it plays nice with scripts and other CLI tools
+
+Sounds great, right? And it is. But there's a catch.
+
+## The Context Window Reality Check
+
+You get a 200k token window. That sounds massive until you actually check what's eating it up.
+
+Run `/context` and you'll see:
+
+- ~22.5% reserved as buffer
+- ~10% for system prompts
+- More chunks eaten by MCP servers, rules, agents, and hooks
+
+In practice? You've got maybe 120k usable tokens. And quality drops well before you hit that ceiling.
+
+So the real question becomes: what's the smallest, highest-signal set of tokens that actually helps the model do good work?
+
+## The Boring Basics (That Actually Work)
+
+Like most dev stuff, the 80/20 rule applies hard here. You'll get 80% of the way there just by doing this:
+
+1. `/upgrade` to max plan (yeah, it costs money)
+2. `/model` set to opus 4.5
+3. `/init` to generate a project context file
+
+From there, the "standard advice" everyone gives is actually correct and underrated.
+
+**Start in plan mode** (shift + tab):
+- Ask Claude to identify what's ambiguous
+- Let it ask *you* questions
+- Refine the plan together
+- Then execute
+
+Think of it like designing a house before you start building. Instead of telling Claude "build a house" and hoping for the best, you collaborate on a blueprint first. Every room, every material, every structural detail. Even if your builder is amazing, having a clear plan means you actually get what you want without expensive rework.
+
+All the fancy stuff (subagents, MCPs, orchestration graphs) is fun, but you don't need it for strong results. Solid fundamentals beat clever setups every time.
+
+## How to Actually Work This Way
+
+Treat every conversation as **one objective**.
+
+Good examples:
+- "I want to debug this issue"
+- "I want to implement this feature"
+- "I want to refactor this module"
+
+For brand-new projects, you can go broader, but that's risky. More scope = more ambiguity = more chances for the model to guess wrong.
+
+When you're starting fresh:
+
+1. Plan longer than feels necessary
+2. Refine the plan again
+3. Ask for reviews: architecture, security, testing, production readiness
+4. Keep going until the model runs out of useful questions
+
+If it's asking questions just to ask questions, you're probably ready to build.
+
+## When to Keep Going vs. Start Over
+
+If things are going well and the work is related, keep the thread alive. Don't reset just because you can.
+
+If context is getting bloated:
+- Run `/compact`
+- Or let Claude do it automatically (that buffer exists for a reason)
+
+But sometimes things go sideways. You know the loop:
+
+> "This isn't right" → worse output → "No, seriously, fix it" → even worse output
+
+If you're stuck in that cycle, **stop**. Don't try to salvage it.
+
+Instead:
+- `/rewind` to when things were working, or
+- `/new` and retry with a clearer prompt
+
+When you restart, explicitly tell Claude what *not* to do based on what failed. That alone fixes things half the time.
+
+## The Complexity Trap
+
+If you're on X (Twitter, whatever), you've probably seen people posting their insane setups:
+
+- Giant MCP stacks
+- Armies of agents
+- Custom skills for everything
+
+It's easy to feel behind. But complexity has a real cost: **context pollution**.
+
+Anthropic puts it well: find the smallest possible set of high-signal tokens.
+
+Dumping tons of external data into context usually makes things worse, not better. And it burns money. More context ≠ better context.
+
+## Using MCPs Properly
+
+MCP servers are external context providers: docs, repos, designs, tickets, whatever.
+
+MCP (Model Context Protocol) is basically a universal connector. Think USB-C for AI tools, one standard interface instead of a mess of custom integrations.
+
+In practice, MCP servers expose capabilities and data sources through that protocol. They run as separate processes and talk to AI clients.
+
+Early on, people overused them. Many MCPs dump massive amounts of low-value text straight into your window.
+
+That said, a few are genuinely useful when used selectively:
+- Web search
+- Up-to-date docs
+- Code search across GitHub
+
+The key is to use them as **on-demand research tools**, not permanent context. Anthropic calls this "just-in-time context" and it works well for coding agents.
+
+Still, tool output costs tokens. Which brings us to a better pattern...
+
+## Claude Code Hooks: Your Quality Gates
+
+Hooks are user-defined shell commands that trigger automatically based on specific events in a Claude Code session.
+
+They give you deterministic control over the agent's behavior. Instead of hoping the LLM remembers to run your linter, you make it a policy that *always* runs.
+
+Think of hooks as your workflow's immune system. Just like your body automatically detects threats and keeps things stable without explicit instructions for every cell, hooks automatically enforce standards, security, and testing, keeping your code "healthy" even when the agent has freedom to move.
+
+### Why Hooks Matter
+
+Hooks let you build robust, efficient, semi-autonomous workflows:
+
+- **Enforcing rules**: Turn "please run the linter" into a policy
+- **Automation**: Auto-format, run tests, send notifications
+- **Quality control**: Block workflows if tests don't pass
+- **Security**: Restrict dangerous commands, protect sensitive files
+- **Feedback**: Nudge Claude when output doesn't match conventions
+- **Integration**: Glue Claude Code into your existing toolchain
+
+### Hook Lifecycle Events
+
+Hooks can run at different points:
+
+- **PreToolUse**: Runs *before* a tool executes. Most powerful, only one that can block execution
+- **PostToolUse**: Runs *after* a tool succeeds. Great for formatting, tests, logging
+- **Notification**: Fires when Claude Code sends you a notification
+- **Stop**: Runs when the main agent finishes responding
+- **SubagentStop**: Runs when a subagent completes
+
+Here’s a simple example: log every Bash command Claude is about to run (plus its description) to a file:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '\\(.tool_input.command) - \\(.tool_input.description // \"No description\")' >> ~/.claude/bash-command-log.txt"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+## Offloading Work with Subagents
+
+Subagents are separate Claude instances spawned by your main agent.
+
+Key facts:
+- They have their own context window
+- They can run cheaper models
+- They can call tools freely
+
+The goal is parallelization and specialized expertise. More efficiency, more precision, more throughput.
+
+### Why Subagents Are Awesome
+
+- **Faster development**: Split work (debugging, testing, docs) and run it in parallel
+- **Specialized expertise**: Define roles (reviewer, debugger) so each agent is optimized for one job
+- **Context preservation**: Each subagent stays isolated. Your main thread doesn't get polluted
+- **Quality assurance**: A "Validator" subagent can critique a "Builder" agent's output, like peer review
+- **Reusability**: Good subagents can be saved and shared across projects
+- **Flexible permissions**: Grant specific tools to specific agents only
+- **Scalability**: Big projects become manageable
+
+This makes them perfect for token-heavy tasks like research.
+
+Instead of polluting your main thread, spin up a subagent whose only job is to gather info and return a concise summary.
+
+For example, a "code expert" agent that:
+- Searches docs and repos
+- Compares implementation patterns
+- Returns a concise recommendation
+
+Another solid pattern is a dedicated code reviewer subagent you run right after changes:
+
+```yaml
+---
+name: code-reviewer
+description: Expert code review specialist. Use immediately after writing or modifying code.
+tools: Read, Grep, Glob, Bash
+---
+
+You are a senior code reviewer ensuring high standards of code quality and security.
+
+When invoked:
+
+1. Run git diff to see recent changes
+2. Focus on modified files
+3. Begin review immediately
+
+Review checklist:
+- Code is simple and readable
+- No duplicated code
+- Proper error handling
+- No exposed secrets or API keys
+- Good test coverage
+
+Provide feedback organized by priority: Critical, Warning, and Suggestion.
+Include specific examples of how to fix issues.
+```
+
+If you want more subagent definitions to copy and adapt, check out [Awesome Claude Code Subagents](https://github.com/VoltAgent/awesome-claude-code-subagents?tab=readme-ov-file).
+
+Your main agent stays clean, focused, and cheap while still getting deep research done.
+
+## Skills: The Opposite Trade-off
+
+Skills work the other way around. Instead of delegating work *out*, you pull specialized instruction sets *in*.
+
+Claude Code ships with skills like "frontend designer", which injects a fairly long prompt covering design principles, constraints, and best practices.
+
+They're useful, but remember: **they consume context**.
+
+Use skills when the guidance genuinely matters for the task. Otherwise, you're just adding noise.
+
+## Final Thoughts
+
+The new state of coding with Claude isn't about clever tricks. It's about **context discipline**.
+
+Every token should either:
+- Reduce ambiguity
+- Guide the next decision
+- Help the model do better work
+
+If it doesn't? Reset, compact, or start over.
+
+All the flashy tooling you see online can help, but it's secondary. Treat the model like a teammate: give it clear goals, relevant information, and the right tools. Not everything all at once.
+
+That's how you avoid slop.
+
+## Shoutout
+
+I pulled a lot of inspiration for this write-up from Frontend Masters:
+
+- [Craft a Professional AI Developer Setup](https://frontendmasters.com/courses/pro-ai/)
+- [Build an AI Agent from Scratch](https://frontendmasters.com/courses/ai-agents/)

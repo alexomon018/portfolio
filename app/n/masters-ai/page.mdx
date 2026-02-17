@@ -1,0 +1,118 @@
+import { AnimatedName } from '../animated-name.tsx';
+
+export const metadata = {
+  title: 'Masters AI',
+  alternates: {
+    canonical: '/n/masters-ai',
+  },
+};
+
+# Masters.chat — An AI-Powered Study Companion for Frontend Masters
+
+<AnimatedName />
+
+
+If you've ever taken a course on [Frontend Masters](https://frontendmasters.com), you know the feeling: hours of dense, expert-led content covering everything from JavaScript fundamentals to advanced system design. It's one of the best learning platforms out there, and I've spent countless hours learning from it.
+
+But here's the thing — after watching dozens of courses, I'd often find myself thinking, *"I know I learned about this somewhere... but which course was it? And what exactly did the instructor say?"*
+
+That question became the spark for **masters.chat**.
+
+## What is Masters.chat?
+
+Masters.chat is a full-stack AI chat application that lets you ask technical questions and get answers grounded in real Frontend Masters course content. Under the hood, it uses Retrieval-Augmented Generation (RAG) to search through transcript embeddings from Frontend Masters courses and return responses that cite actual instructors, course names, and timestamps.
+
+Think of it as a study buddy that has watched every Frontend Masters course published in the past two years and can recall exactly what was said, by whom, and when.
+
+## Why I Built It
+
+Two reasons, really.
+
+### A Love Letter to Frontend Masters
+
+Frontend Masters has been a massive part of my growth as a developer. The quality of instruction, the depth of topics, and the calibre of instructors — it's genuinely special. I wanted to build something that celebrated that content and made it more accessible in a new way. Not a replacement for watching the courses, but a companion that helps you revisit and connect ideas across them.
+
+### A Playground for AI
+
+I'd been itching to get my hands dirty with AI tooling — not just calling an API and displaying a response, but really understanding the full pipeline: vector embeddings, retrieval strategies, streaming architectures, prompt engineering, and agentic tool use. Masters.chat gave me the perfect excuse to explore all of that in the context of something I actually cared about.
+
+This project was never about building a product or making money. You might notice that the account page mentions "payment coming soon" with a Pro tier — that's there because I wanted to build a realistic, complete application experience as part of the learning process. Designing pricing UI, quota systems, and upgrade flows taught me a lot about product engineering. But the goal was always education and experimentation, not revenue.
+
+## How It Works
+
+### The RAG Pipeline
+
+When you ask a technical question, the app doesn't just send it to an LLM and hope for the best. Here's what actually happens:
+
+1. **Intent Detection** — The agent first determines if your message is a casual greeting or a technical question. Casual messages skip RAG entirely (no need to search a vector database just to say "hello").
+
+2. **Vector Search** — For technical queries, the agent calls a RAG tool that searches an Upstash Vector database containing embeddings from Frontend Masters transcripts. It retrieves the top 10 results by cosine similarity, filters to a minimum relevance score, deduplicates by course, and returns the top 5 most relevant excerpts.
+
+3. **Grounded Response** — The LLM generates its answer using those transcript excerpts as context, citing the instructor and course name. It's instructed to never fabricate course content or make up instructor names.
+
+4. **Streaming** — The response streams to the browser in real time, so you see the answer forming word by word.
+
+### Local-First Architecture
+
+One of the architectural decisions I'm most proud of: **all chat data lives in your browser's IndexedDB by default**. There's no mandatory account, no forced cloud storage. You can use the app anonymously, and your conversations stay on your device.
+
+For users who do sign in, there's an optional bidirectional sync to a Neon Postgres database. The sync uses a smart merge strategy — for each piece of data, whichever version (local or cloud) has the more recent timestamp wins. This means you can use the app across devices without losing anything.
+
+### Auto-Generated Thread Titles
+
+After your first message in a conversation, the app automatically generates a concise two-word title for the thread (like "React Hooks" or "CSS Grid") using a structured output call to GPT-4o. It's a small touch, but it makes navigating your conversation history much more pleasant.
+
+## Tech Stack
+
+Here's what powers the app:
+
+- **Next.js 15** with App Router and React 19
+- **Vercel AI SDK** for streaming and agentic tool use
+- **Upstash Vector** for transcript embeddings and RAG retrieval
+- **Upstash Redis** for rate limiting and message quotas
+- **Dexie (IndexedDB)** as the primary local data store with live queries
+- **Neon Postgres + Drizzle ORM** for optional cloud sync
+- **Clerk** for authentication
+- **Zustand** for global state management
+- **TanStack Query** for server state
+- **Tailwind CSS + Radix UI** for the interface
+- **OpenAI and Anthropic** model providers (GPT-4o-mini, Claude 3 Haiku)
+
+The component architecture follows Atomic Design — atoms, molecules, and organisms — with each organism co-locating a custom hook for clean separation between logic and presentation.
+
+## Features Worth Highlighting
+
+- **Multi-model support** — Switch between AI models mid-conversation. Enable or disable models from the settings page based on what you prefer.
+- **Global search** — `Cmd+K` opens a search overlay that searches across all thread titles and message content in real time.
+- **Personalisation** — Tell the app your name, occupation, and preferences, and the AI tailors its responses accordingly.
+- **Message quotas** — Anonymous users get a daily limit; authenticated users get a higher one. All tracked via Redis with 24-hour TTL windows.
+- **Rate limiting** — Sliding window rate limits prevent abuse without degrading the experience for normal use.
+- **Dark mode** — Full theme support with system preference detection and no flash of unstyled content.
+- **Mobile responsive** — Slide-over sidebar, mobile header, touch-friendly interactions.
+- **Virtualised message list** — Long conversations stay performant thanks to `virtua`, which only renders visible messages in the DOM.
+
+## It's Not About the Money
+
+I want to be upfront about this: masters.chat was built as a personal project and a learning exercise. The "Pro" upgrade section, pricing cards, and "coming soon" payment references exist because building those features taught me about product design patterns — quota systems, upgrade flows, tiered access. But I have no plans to monetise this.
+
+Frontend Masters is a platform that has given me so much as a developer. This project is my way of paying tribute to that, not profiting from it. The content in the RAG database serves to point users *toward* Frontend Masters courses, not away from them.
+
+## What I Learned
+
+Building masters.chat pushed me into areas I hadn't explored before:
+
+- **RAG is more than a buzzword.** Tuning relevance thresholds, deduplication strategies, and prompt instructions to get actually useful citations took real iteration.
+- **Local-first is powerful but tricky.** Bidirectional sync with conflict resolution is genuinely hard. SuperJSON serialisation, Dexie transactions, and careful timestamp comparison made it work.
+- **Streaming UX matters.** The difference between waiting 3 seconds for a full response and seeing text appear in real time is enormous for perceived performance.
+- **Agentic patterns unlock flexibility.** Having the AI decide *when* to search versus *when* to just respond made the experience feel natural rather than mechanical.
+- **Building "complete" features teaches more than prototyping.** Implementing rate limiting, quota tracking, structured logging, error handling with `tryCatch`, and CI/CD taught me more about production engineering than any tutorial.
+
+## Wrapping Up
+
+Masters.chat started as a "what if" and turned into one of the most rewarding projects I've built. It combines two things I care about — the Frontend Masters community and the evolving landscape of AI — into something that's genuinely useful for learning.
+
+If you're a Frontend Masters fan, give it a try. And if you're a developer thinking about building with AI, I hope this project shows that you don't need a business plan to build something meaningful. Sometimes the best projects are the ones you build just because you're curious.
+
+---
+
+*Built with Next.js, Vercel AI SDK, Upstash, and a lot of love for Frontend Masters.*

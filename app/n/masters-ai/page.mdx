@@ -116,3 +116,5 @@ If you're a Frontend Masters fan, give it a try. And if you're a developer think
 ---
 
 *Built with Next.js, Vercel AI SDK, Upstash, and a lot of love for Frontend Masters.*
+
+> **Update:** I've since torn the chat engine out and rebuilt it on Cloudflare Workers and Durable Objects — moved the agent off the Next.js API route, deleted the whole local-first sync layer, and gave every thread its own little stateful object. I wrote up the why (and how much code I got to delete) in [I rebuilt Masters.chat on Cloudflare](/n/masters-ai-v2).

@@ -1,0 +1,113 @@
+import { AnimatedName } from '../animated-name.tsx';
+
+export const metadata = {
+  title: 'Masters AI v2 — Moving to Cloudflare',
+  alternates: {
+    canonical: '/n/masters-ai-v2',
+  },
+};
+
+# I rebuilt Masters.chat on Cloudflare, and deleted a ton of code doing it
+
+<AnimatedName />
+
+A while back I wrote about [masters.chat](/n/masters-ai) — my little AI study buddy for Frontend Masters. RAG over course transcripts, built on Next.js and the Vercel AI SDK, with chat history living in the browser and syncing up to Postgres. I was pretty happy with it. Most of that first post still holds up.
+
+Then I ripped a big chunk of it out and rebuilt it on Cloudflare.
+
+The chat engine doesn't run in a Next.js API route anymore. It runs on Cloudflare Workers, with one Durable Object per conversation, and the browser just talks to it directly over a WebSocket. The git commit that did most of the damage is honestly named "biggest refactor ever." So I figured I owed it a write-up: why I bothered, what I tossed out, and why the thing I ended up with is smaller *and* better.
+
+## First, what was actually bugging me
+
+The old version worked. Let me be clear about that. But a few things kept nagging at me every time I opened the codebase.
+
+The first one: **every chat message took a detour.** It went browser → Next.js function → the model → and all the way back. That Next.js route (`/api/masters`) wasn't really *doing* much — it held the API key and piped the stream through. But it meant a serverless function was spinning up to babysit a long-lived streaming connection, which is pretty much the one job serverless functions are worst at. It always felt like fighting the tool.
+
+The second one was the sync layer, and this is the one that actually kept me up. Chat history lived in the browser (IndexedDB, via Dexie), and signed-in users got optional two-way sync to Neon Postgres. Which sounds nice until you realize **two-way sync means you have two copies of the truth and neither one is in charge.** I'd written a whole 290-line subsystem to make them agree — SuperJSON, Dexie transactions, timestamp comparisons, the works. It was clever code. It was also the buggiest, least fun part of the project, and it only existed because the chat history had nowhere natural to live.
+
+And that's really the third thing, the one underneath the other two: **the conversation and the code that runs it lived in totally different places.** The thing that *is* a conversation — its history, its context — was scattered across a browser and a database. The thing that runs the agent over it was a stateless function somewhere else. Every single turn, I was gluing those back together from scratch. There was no object anywhere that just *was* the conversation.
+
+That last one is exactly the hole Durable Objects fill, which is why this whole thing started.
+
+## The moment it clicked
+
+If you haven't run into them: a Durable Object is a single, addressable, stateful thing. You hand Cloudflare an id, and it promises there's exactly one instance of that object for that id, anywhere on earth, with its own private storage bolted on.
+
+Here's the moment it clicked for me: **a chat thread is a Durable Object.** Not "a row a function reads." An actual object — one per `threadId` — that holds its own message history in its own little SQLite database, runs the agent loop itself, and streams straight back to whoever's connected.
+
+And the second I framed it that way, three separate headaches just... merged into one answer:
+
+- *Where does history live?* In the object. One copy, sitting right next to the code that uses it. No sync. No merge. No second source of truth to babysit.
+- *Where does the agent run?* In that same object. The context it needs is already right there — nothing to re-fetch.
+- *How does the browser reach it?* A WebSocket, routed straight to the right object by id.
+
+I built on Cloudflare's `agents` SDK and its `AIChatAgent` class, which hands a Durable Object a persisted `messages` array and an `onChatMessage()` hook for free. My `MastersChatAgent` extends it — a message comes in, the hook handles the boring-but-important stuff (auth, quota, picking a model, trimming old history), then streams the answer back. I never write a line of SQL for chat history. It just persists.
+
+## So what does it look like now
+
+Roughly this:
+
+```
+Browser
+  ├── POST /ws-ticket   ─▶ Worker (Clerk JWT → single-use 30s ticket)
+  │
+  ├── WebSocket ────────▶ Worker
+  │                         ├─ who are you? (ticket / anonId → userId)
+  │                         ├─ is this your thread? (D1 ownership check)
+  │                         └─ MastersChatAgent (one Durable Object per thread)
+  │                               ├─ history in its own SQLite
+  │                               ├─ Upstash Redis for daily quota
+  │                               ├─ Upstash Vector for the RAG search
+  │                               └─ stream the answer back
+  │
+  ├── HTTP /threads* ───▶ D1 (just the sidebar metadata)
+  └── /api/name-thread ─▶ Anthropic Haiku (auto-naming new threads)
+```
+
+The browser connects **straight to the Worker** over a WebSocket. No `/api/masters` middleman — that route is just gone. Next.js is still around for the UI, the auth pages, account settings, naming threads — but it's completely out of the way when you're actually chatting.
+
+A handful of decisions I'm glad I made (or learned the hard way):
+
+**Two databases, each doing the one thing it's good at.** The Durable Object's SQLite holds the actual *contents* of a conversation. A tiny Cloudflare D1 database holds only what the sidebar needs — id, title, pinned, timestamps. D1 is great at "list this user's threads, newest first." The DO is great at "be this one conversation." Neither tries to do the other's job. Postgres and the whole Dexie local-first thing? Gone.
+
+**Identity that survives a nap.** Durable Objects hibernate when they're idle — they dump their in-memory state and the runtime evicts them. That's a *good* thing (you're not paying for a conversation nobody's looking at), but it bit me: my home page opens a socket the moment it loads, so threads go idle and hibernate constantly. Anything I'd stashed on the instance just vanished. The fix was to keep identity on the connection itself (`connection.setState`), which rides along with the WebSocket and survives the nap. Classic "learn how the platform actually behaves" bug.
+
+**Auth without leaking tokens.** WebSocket upgrades can't cleanly carry an auth header from the browser, and the lazy move — shoving the token in the query string — means it ends up in access logs forever. So instead the browser trades its Clerk login for a single-use, 30-second ticket first, and the socket connects with that. Anonymous folks get a signed cookie instead. Either way auth happens *before* the socket opens, so a rejected user gets a clean 401 and never an open connection.
+
+**Trimming history where it lives.** Since the object owns the history, it also handles keeping it from ballooning. Once a conversation gets long enough, the older turns get summarized into one tidy note and the recent ones are kept as-is. Token costs stay sane and the browser never has to think about it.
+
+## Why I actually think it's better
+
+**No more detour.** Chat is browser-to-Worker now. Workers run at the edge with basically no cold start, over a persistent connection instead of a function booting up per request. For streaming chat, that's just the right tool finally.
+
+**The truth lives in one place.** This is the big one, and weirdly the win isn't speed — it's that I got to **delete the entire sync subsystem.** No more two-way merge, no SuperJSON-over-Dexie, no timestamp tiebreakers, no second copy of anything. The conversation lives in exactly one spot, next to the code that runs it. Hundreds of lines of the gnarliest code in the project just stopped needing to exist. Deleting code that scared you is the best feeling in this job.
+
+**It scales the obvious way.** Ten thousand conversations are ten thousand independent little objects, each with its own storage and its own isolated runtime — not ten thousand requests elbowing each other in a shared function pool. Isolation comes for free instead of being something I had to design.
+
+**You pay for what's awake.** Idle threads hibernate. That conversation you had last Tuesday costs nothing until you come back and poke it, at which point it wakes up with everything still there.
+
+**Evals can't drift from prod.** The system prompt, the tools, the step limit, the "don't burn a RAG call on *hi*" shortcut — all of it lives in one shared core that both the live Worker and my eval harness import. They literally can't fall out of sync, because they're the same code. (I also hooked up Braintrust tracing so I can actually see what the agent's doing.)
+
+## The one-line takeaway
+
+If I had to boil it down: **I'd been modelling a stateful thing with stateless tools.** A conversation has an identity and a memory and a lifecycle — and I was rebuilding all of that on every request out of bits scattered across a browser and a Postgres box. Durable Objects just let me name the thing that was sitting there in the design the whole time. Once "a thread is an object" was true, the detour, the sync layer, and the split-brain compute all turned out to be stuff I'd accidentally invented, not stuff I needed.
+
+Is Cloudflare the right call for everything? Nah. If I needed heavy relational queries across all the conversations at once, or I had some big existing Postgres schema to honor, I'd be doing the math differently. But for "a bunch of independent, long-lived, stateful chat sessions," Workers + Durable Objects fit so snugly that the whole thing got *smaller* as it got more capable. That basically never happens. When it does, you write a blog post about it.
+
+## The stack, v2 edition
+
+- **Next.js 15** — the UI, auth, account stuff, thread naming
+- **Cloudflare Workers** — the agent, running at the edge
+- **Cloudflare Durable Objects** — one per thread, SQLite for history
+- **Cloudflare D1** — the thread index for the sidebar
+- **`agents` SDK + `@cloudflare/ai-chat`** — `AIChatAgent`, `useAgent`, `useAgentChat`
+- **Vercel AI SDK** — still doing the agent loop and streaming, just on the Worker now
+- **Upstash Vector** — RAG over the transcripts (untouched, still excellent)
+- **Upstash Redis** — daily quotas and those single-use WebSocket tickets
+- **Clerk** — auth
+- **Braintrust** — evals and tracing
+- **OpenAI + Anthropic** — the models (Claude Haiku/Sonnet, GPT-5.x)
+
+---
+
+*Same project as the [original masters.chat post](/n/masters-ai), one big rewrite later. The mission's the same — it's still a study buddy for Frontend Masters. The architecture just finally grew into the shape of the problem.*
